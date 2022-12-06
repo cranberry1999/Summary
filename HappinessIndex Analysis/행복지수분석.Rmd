@@ -1,7 +1,6 @@
 ---
-title: "R Term"
-author: "201821479_황혜린"
-date: "2018년 12월 1일"
+title: "행복지수 분석"
+author: "황혜린"
 output: html_document
 ---
 
