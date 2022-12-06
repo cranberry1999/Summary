@@ -1,7 +1,6 @@
 ---
-title: "HW2_201821479_황혜린"
-author: "201821479_황혜린"
-date: "2018년 11월 21일"
+title: "Bitcoin Analysis"
+author: "황혜린"
 output: word_document
 ---
 
