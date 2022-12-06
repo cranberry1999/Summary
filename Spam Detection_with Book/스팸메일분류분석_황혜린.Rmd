@@ -1,0 +1,325 @@
+---
+title: "spam-detection"
+author: "201821479_황혜린"
+date: "2018년 11월 30일"
+output: html_document
+---
+
+# CONTENTS
+
+---
+
+
+-0. 사용할 함수 
+
+-1. 환경준비, 스펨데이터 불러오기
+
+-2. 기초분석 
+-2-1. 예측변수와 반응변수와의 상관관계 분석
+-2-2. 데이터 시각화 
+
+-3. 데이터 분석
+-3-0. 변수명의 특수문자 처리
+-3-1. 세트 구분
+-3-2. 로지스틱 회귀 
+-3-2-1. 로지스틱 회귀모형에 훈련세트 적합
+-3-2-2. 검증세트 사용하여 모형 평가
+-3-3. Decision Tree 
+-3-3-1. 나무 모형에 훈련세트 적합 
+-3-3-2. 검증세트 사용하여 모형 평가 
+-3-4. 랜덤 포레스트 
+-3-4-1. 랜덤 포레스트 모형에 훈련세트 적합
+-3-4-2. 검증세트 사용하여 모형 평가 
+
+-4. 최종 모형선택 
+
+-5. 선택된 모형으로 테스트 세트 계산
+
+-6. Reference
+
+---
+
+# 0. 사용할 함수
+```{r}
+# 이항편차를 구하는 함수 
+binomial_deviance <- function(y_obs, yhat){
+  epsilon = 0.0001
+  yhat = ifelse(yhat < epsilon, epsilon, yhat)
+  yhat = ifelse(yhat > 1-epsilon, 1-epsilon, yhat)
+  a = ifelse(y_obs==0, 0, y_obs * log(y_obs/yhat))
+  b = ifelse(y_obs==1, 0, (1-y_obs) * log((1-y_obs)/(1-yhat)))
+  return(2*sum(a + b))
+}
+```
+
+---
+
+# 1. 환경준비, 스펨데이터 불러오기 
+```{r}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(MASS)
+library(glmnet)
+library(randomForest)
+library(gbm)
+library(rpart)
+library(boot)
+library(data.table)
+library(ROCR)
+library(gridExtra)
+
+
+setwd("C:/Users/hyere/Desktop/R/CSVdata")
+
+data <- tbl_df(read.table("spambase.data", strip.white = TRUE,
+                          sep=",", header = FALSE))
+names(data) <-
+  c('word_freq_make', 'word_freq_address', 'word_freq_all', 'word_freq_3d', 'word_freq_our',
+    'word_freq_over', 'word_freq_remove', 'word_freq_internet', 'word_freq_order', 'word_freq_mail',
+    'word_freq_receive', 'word_freq_will', 'word_freq_people', 'word_freq_report', 'word_freq_addresses',
+    'word_freq_free', 'word_freq_business', 'word_freq_email', 'word_freq_you', 'word_freq_credit',
+    'word_freq_your', 'word_freq_font', 'word_freq_000', 'word_freq_money', 'word_freq_hp',
+    'word_freq_hpl', 'word_freq_george', 'word_freq_650', 'word_freq_lab', 'word_freq_labs',
+    'word_freq_telnet', 'word_freq_857', 'word_freq_data', 'word_freq_415', 'word_freq_85',
+    'word_freq_technology', 'word_freq_1999', 'word_freq_parts', 'word_freq_pm', 'word_freq_direct',
+    'word_freq_cs', 'word_freq_meeting', 'word_freq_original', 'word_freq_project', 'word_freq_re',
+    'word_freq_edu', 'word_freq_table', 'word_freq_conference', 'char_freq_;', 'char_freq_(',
+    'char_freq_[', 'char_freq_!', 'char_freq_$', 'char_freq_#', 'capital_run_length_average',
+    'capital_run_length_longest', 'capital_run_length_total',
+    # 'spam'
+    'class'
+  )
+names(data)[58] <- 'class'  #반응변수 "class"
+data$class <- factor(data$class)
+
+glimpse(data)  #데이터 확인 
+
+```
+
+---
+
+# 2. 기초분석 
+
+---
+
+## 2-1. 반응변수의 분포  
+
+```{r}
+# 스팸데이터의 비율 시각화 
+data %>% ggplot(aes(class)) + geom_bar()
+# (스팸인 이메일(1)이 스팸이 아닌 이메일 수보다 적음을 알 수 있다.)
+
+
+```
+
+---
+
+## 2-2. EDA: 탐색적 데이터 분석 / 시각화 
+
+```{r}
+# ggplot2란 라이브러리를 활용하여 제가 생각했을 때 스펨이메일에 자주 등장할 것 같은 변수(business, $, credit)들의 분포를 나타내었습니다. 또한 스펨메일 분포에 '연속적으로 등장하는 대문자들 중 가장 긴 길이'가 미치는 영향을 알고싶어 추가적으로 시각화 하였습니다. 
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+p1 <- data %>% ggplot(aes(class, word_freq_business)) +
+  geom_jitter(col='gray') +
+  geom_boxplot(alpha=.5) +
+  scale_y_sqrt()
+p2 <- data %>% ggplot(aes(class, `char_freq_$`)) +
+  geom_jitter(col='gray') +
+  geom_boxplot(alpha=.5) +
+  scale_y_sqrt()
+p3 <- data %>% ggplot(aes(class, `char_freq_!`)) +
+  geom_jitter(col='gray') +
+  geom_boxplot(alpha=.5) +
+  scale_y_sqrt()
+p4 <- data %>% ggplot(aes(class, capital_run_length_longest)) +
+  geom_jitter(col='gray') +
+  geom_boxplot(alpha=.5) +
+  scale_y_log10()
+grid.arrange(p1, p2, p3, p4, ncol=2)
+```
+
+---
+
+# 3. 데이터 분석
+
+---
+
+## 3-0. 변수명의 특수문자 처리
+- 일부 함수는 입력데이터의 변수명에 특수문자가 들어가면 에러를 일으키므로 make.names()함수를 사용하여 변수명을 변경해주었습니다. 
+```{r}
+old_names <- names(data)
+new_names <- make.names(names(data), unique = TRUE)
+cbind(old_names, new_names) [old_names!=new_names, ]
+
+names(data) <- new_names
+```
+
+---
+
+## 3-1. 데이터 나누기: 세트 구분
+- 훈련:검증:테스트 세트 = 60:20:20 
+
+```{r}
+set.seed(1999) #재현 가능한 연구를 위해 seed설정 
+n <- nrow(data)
+idx <- 1:n
+
+#훈련 세트 
+training_idx <- sample(idx, n * .60)
+idx <- setdiff(idx, training_idx)
+
+#검증세트 
+validate_idx <- sample(idx, n * .20)
+
+#테스트 세트 
+test_idx <- setdiff(idx, validate_idx)
+
+training <- data[training_idx,]
+validation <- data[validate_idx,]
+test <- data[test_idx,]
+```
+
+---
+
+## 3-2. 로지스틱 회귀 
+
+---
+
+### 3-2-1. 로지스틱 회귀모형에 훈련세트 적합 
+```{r}
+#glm() 함수 사용
+data_lm_full <- glm(class ~ ., data=training, family=binomial)
+summary(data_lm_full)
+
+```
+
+-결과로부터 어떤 변수들이 스팸 여부에 대한 예측력이 높은지에 대한 정보를 얻을 수 있다. 
+-뒤에 있는 '*'의 개수가 많을수록 예측력이 높은 변수이다. 
+---
+
+### 3-2-2. 검증세트 사용하여 모형 평가 
+```{r}
+y_obs <- as.numeric(as.character(validation$class))
+yhat_lm <- predict(data_lm_full, newdata = validation, type='response')
+pred_lm <- prediction(yhat_lm, y_obs)
+performance(pred_lm, "auc")@y.values[[1]]
+```
+
+---
+
+## 3-3. Decision Tree 
+
+---
+
+### 3-3-1. 나무 모형에 훈련세트 적합 
+```{r}
+# 나무모형
+data_tr <- rpart(class ~ ., data = training)
+data_tr
+
+printcp(data_tr)
+summary(data_tr)
+
+
+opar <- par(mfrow = c(1,1), xpd = NA)
+plot(data_tr)
+text(data_tr, use.n = TRUE)
+par(opar)
+
+```
+
+---
+
+### 3-3-2. 검증세트 사용하여 모형 평가 
+```{r}
+yhat_tr <- predict(data_tr, validation)
+yhat_tr <- yhat_tr[,"1"]
+pred_tr <- prediction(yhat_tr, y_obs)
+performance(pred_tr, "auc")@y.values[[1]]
+
+#예측력이 약한 편이다 
+```
+
+---
+
+## 3-4. 랜덤 포레스트 
+
+---
+
+### 3-4-1. 랜덤 포레스트 모형에 훈련세트 적합 
+
+```{r}
+set.seed(2018)
+data_rf <- randomForest(class ~ ., data=training)
+data_rf
+
+opar <- par(mfrow=c(1,2))
+plot(data_rf) #데이터에서 나무 수에 따른 오차율의 감소 
+#tree가 100개면 꽤 괜찮은 측정값을 얻을 수 있음 
+varImpPlot(data_rf)#각 예측변수의 중요도
+
+par(opar)
+```
+
+---
+
+### 3-4-2. 검증세트 사용하여 모형 평가 
+```{r}
+yhat_rf <- predict(data_rf, newdata=validation, type='prob')[,'1']
+pred_rf <- prediction(yhat_rf, y_obs)
+performance(pred_rf, "auc")@y.values[[1]]
+
+```
+
+---
+
+# 4. 최종 모형선택 
+```{r}
+data.frame(method=c('rf', 'lm', 'tr'),
+           auc = c(performance(pred_rf, "auc")@y.values[[1]],
+                   performance(pred_lm, "auc")@y.values[[1]],
+                
+                   performance(pred_tr, "auc")@y.values[[1]]
+                   ))   
+```
+
+---
+
+## ROC 커브 
+```{r}
+perf_lm <- performance(pred_lm, measure = "tpr", x.measure = "fpr")
+perf_tr <- performance(pred_tr, measure="tpr", x.measure="fpr")
+perf_rf <- performance(pred_rf, measure="tpr", x.measure="fpr")
+
+plot(perf_lm, col='black', main="ROC Curve")
+plot(perf_tr, add=TRUE, col='cyan')
+plot(perf_rf, add=TRUE, col='red')
+abline(0,1)
+legend('bottomright', inset=.1,
+    legend=c("LM", "DT", "RF"),
+    col=c('black', 'cyan', 'red'), lty=1, lwd=2)
+```
+
+---
+
+# 5. 선택된 모형으로 테스트 세트 계산 
+```{r}
+# 랜덤 포레스트 
+y_obs_test <- as.numeric(as.character(test$class))
+yhat_rf_test <- predict(data_rf, newdata=test, type='prob')[,'1']
+pred_rf_test <- prediction(yhat_rf_test, y_obs_test)
+performance(pred_rf_test, "auc")@y.values[[1]]
+```
+
+---
+
+# 6. Reference
+-따라하며 배우는 데이터 과학  (저자: 권재명)
+
+-http://redhorse046.tistory.com/
+
+-https://cran.r-project.org/ 
+
