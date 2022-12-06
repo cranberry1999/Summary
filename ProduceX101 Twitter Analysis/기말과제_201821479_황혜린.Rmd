@@ -1,7 +1,6 @@
 ---
-title: "기말과제_201821479_황혜린"
-author: "201821479_황혜린"
-date: '2019 5 12 '
+title: "ProduceX101 Twitter Analysis"
+author: "황혜린"
 output: html_document
 ---
 
